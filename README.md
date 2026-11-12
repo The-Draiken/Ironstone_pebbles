@@ -1,7 +1,6 @@
 # Ironstone Pebble Collection
 
-Lets every ioun stone orbit your head without using the head slot, so any
-number of them stack. Works on BG:EE, BG2:EE, EET and IWD:EE.
+Based on MindTyrants original component from his Eldritch-Magic-Reborn Mod where ioun stones could orbit your head without using the head slot, the issue with the component was that it could only accomadate base game Ioun Stones and not ones from Mods, as there are so many Item Mods that might add any number of Ioun Stone, So now so any number of them stack. Works on BG:EE, BG2:EE, EET and IWD:EE.
 
 ## Use
 
@@ -12,8 +11,7 @@ number of them stack. Works on BG:EE, BG2:EE, EET and IWD:EE.
 
 ## Install
 
-Copy the `ironstone_pebbles` folder into the game folder, add a WeiDU setup
-executable (copy any `setup-*.exe` to `setup-ironstone_pebbles.exe`) and run it.
+Copy the `ironstone_pebbles` and `setup-ironstone_pebbles.exe` folder into the game folder and run it.
 
 **Install it after every mod that adds items.** Stones are detected at install
 time, so a stone added by a mod installed later is not covered until you
@@ -43,8 +41,8 @@ list of stones it changed.
   a small addition to the game scripts `baldur.bcs` / `baldur25.bcs`.
 - Maximum HP bonuses are applied as an ordinary long-lasting effect instead of
   a permanent one, so they are saved and loaded with the game and are removed
-  on recall. Death strips such effects, so the stone re-applies its HP bonus
-  within one round of being raised.
+  on recall. (Being Unablee to save and Load with HP Bonuses was an issue of MindTyrants versions) Death strips such effects, so the stone re-applies its HP bonus
+  within one round of being raised. 
 - Spell names are numbered in alphabetical order of the stones (`IPC001A` ...).
   Recall all orbiting stones before uninstalling or reinstalling this mod with
   a different set of item mods, or the orbiting effects will be orphaned.
