@@ -1,0 +1,37 @@
+// Shared by all components: settings, then the list of ioun stones in the game.
+INCLUDE ~%MOD_FOLDER%/settings.tpa~
+ACTION_CLEAR_ARRAY ipc_stones
+
+// ---------------------------------------------------------------------------
+// Find every ioun stone currently in the game, whoever added it.
+// ---------------------------------------------------------------------------
+COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
+  PATCH_IF (SOURCE_SIZE > 0x71) BEGIN
+    SPRINT ipc_res ~%SOURCE_RES%~
+    TO_LOWER ipc_res
+    READ_SHORT 0x1c cat
+    SET hit = 0
+    PATCH_IF (cat = 7 OR cat = 72) BEGIN
+      PATCH_IF (VARIABLE_IS_SET $ipc_include(~%ipc_res%~)) BEGIN
+        SET hit = 1
+      END ELSE BEGIN
+        READ_LONG 0x08 n1
+        READ_LONG 0x0c n2
+        PATCH_IF (n1 >= 0) BEGIN
+          READ_STRREF 0x08 s
+          PATCH_IF (~%s%~ STRING_CONTAINS_REGEXP ~[Ii][Oo][Uu][Nn]~ = 0) BEGIN SET hit = 1 END
+        END
+        PATCH_IF (n2 >= 0) BEGIN
+          READ_STRREF 0x0c s
+          PATCH_IF (~%s%~ STRING_CONTAINS_REGEXP ~[Ii][Oo][Uu][Nn]~ = 0) BEGIN SET hit = 1 END
+        END
+      END
+      PATCH_IF (VARIABLE_IS_SET $ipc_exclude(~%ipc_res%~)) BEGIN SET hit = 0 END
+    END
+    PATCH_IF (hit) BEGIN
+      SPRINT $ipc_stones(~%ipc_res%~) ~1~
+    END
+  END
+BUT_ONLY
+
+ACTION_SORT_ARRAY_INDICES ipc_stones LEXICOGRAPHICALLY

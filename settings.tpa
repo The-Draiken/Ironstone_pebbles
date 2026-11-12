@@ -1,0 +1,38 @@
+// ---------------------------------------------------------------------------
+// Ironstone Pebble Collection - user settings. Edit before installing.
+// ---------------------------------------------------------------------------
+
+// 1 = stones no longer need identifying (recommended). A stone that comes back
+//     out of orbit is a freshly created item, so with 0 you would have to
+//     identify it again every time you recall it.
+OUTER_SET ipc_auto_identify = 1
+
+// 1 = add a short "how to put in orbit" note to each stone's description.
+OUTER_SET ipc_describe = 1
+
+// Stones are found automatically: any head-slot item whose name contains
+// "Ioun". Use these two lists (lower-case item file names, no extension) to
+// correct the automatic detection.
+
+// Head-slot items to treat as ioun stones even though they are not named so.
+ACTION_DEFINE_ASSOCIATIVE_ARRAY ipc_include BEGIN
+  ~ipc_none~ => 1
+  // ~c#q04001~ => 1   // example
+END
+
+// Items to leave alone even though they look like ioun stones.
+ACTION_DEFINE_ASSOCIATIVE_ARRAY ipc_exclude BEGIN
+  ~ipc_none~ => 1
+END
+
+// ---------------------------------------------------------------------------
+// Orbit visuals component only.
+// Stones with no working orbit animation get one coloured to match: first a
+// colour word in the stone's name, otherwise the main colour of its icon.
+// To choose yourself, list the item here with one of these codes:
+//   RD red   OR orange  GD gold    GR green   CY turquoise  BL blue
+//   PU purple  PK pink  WH white   SV silver  DK dark       BZ bronze
+ACTION_DEFINE_ASSOCIATIVE_ARRAY ipc_colour BEGIN
+  ~ipc_none~ => ~WH~
+  // ~wqxio1~ => ~PU~   // example
+END

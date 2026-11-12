@@ -1,0 +1,22 @@
+// Recall of a cursed ioun stone (number %ipc_n%) by party member %ipc_p%.
+// The stone's Recall ability sets the local variable IPCRC on its user.
+IF
+  TriggerOverride(Player%ipc_p%,Global("IPCRC","LOCALS",%ipc_n%))
+  TriggerOverride(Player%ipc_p%,HasItemSlot(Myself,SLOT_HELMET))
+THEN
+  RESPONSE #100
+    ActionOverride(Player%ipc_p%,SetGlobal("IPCRC","LOCALS",0))
+    ActionOverride(Player%ipc_p%,DisplayStringHead(Myself,%ipc_str%))
+    ActionOverride(Player%ipc_p%,ApplySpellRES("IPC%ipc_num%D",Myself))
+    Continue()
+END
+
+IF
+  TriggerOverride(Player%ipc_p%,Global("IPCRC","LOCALS",%ipc_n%))
+  !TriggerOverride(Player%ipc_p%,HasItemSlot(Myself,SLOT_HELMET))
+THEN
+  RESPONSE #100
+    ActionOverride(Player%ipc_p%,SetGlobal("IPCRC","LOCALS",0))
+    ActionOverride(Player%ipc_p%,ApplySpellRES("IPC%ipc_num%C",Myself))
+    Continue()
+END

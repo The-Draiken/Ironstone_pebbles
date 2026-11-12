@@ -1,0 +1,332 @@
+BACKUP ~weidu_external/ironstone_pebbles/backup~
+SUPPORT ~See ironstone_pebbles/README.md~
+VERSION ~v1.0~
+AUTO_EVAL_STRINGS
+
+LANGUAGE ~English~ ~english~ ~ironstone_pebbles/lang/english/setup.tra~
+
+BEGIN @1 DESIGNATED 0 LABEL ~ironstone_pebbles-orbit~
+REQUIRE_PREDICATE GAME_IS ~bgee bg2ee eet iwdee~ @2
+FORBID_COMPONENT ~emreborn/emreborn.tp2~ ~40~ @3
+
+// Effect record layout (48 bytes):
+// 0x00 opcode(2) 0x02 target 0x03 power 0x04 param1 0x08 param2 0x0c timing
+// 0x0d dispel/resist 0x0e duration 0x12 prob1 0x13 prob2 0x14 resref(8)
+// 0x1c dice 0x20 dice size 0x24 save type 0x28 save bonus 0x2c special
+
+// Appends one new effect to the single ability of a spell built from ipcbase.spl.
+DEFINE_PATCH_FUNCTION ipc_fx
+  INT_VAR op = 0 tim = 1 p1 = 0 p2 = 0 dur = 0 special = 0
+  STR_VAR res = ~~
+BEGIN
+  SET o = BUFFER_LENGTH
+  INSERT_BYTES o 48
+  WRITE_SHORT o op
+  WRITE_BYTE (o + 0x02) 1
+  WRITE_LONG (o + 0x04) p1
+  WRITE_LONG (o + 0x08) p2
+  WRITE_BYTE (o + 0x0c) tim
+  WRITE_LONG (o + 0x0e) dur
+  WRITE_BYTE (o + 0x12) 100
+  WRITE_ASCIIE (o + 0x14) ~%res%~ #8
+  WRITE_LONG (o + 0x2c) special
+  READ_SHORT 0x90 c
+  WRITE_SHORT 0x90 (c + 1)
+END
+
+// Appends a raw effect copied from an item, retimed for use in a spell.
+DEFINE_PATCH_FUNCTION ipc_raw
+  INT_VAR tim = 9 dur = 0
+  STR_VAR fx = ~~
+BEGIN
+  SET o = BUFFER_LENGTH
+  INSERT_BYTES o 48
+  WRITE_ASCIIE o ~%fx%~
+  WRITE_BYTE (o + 0x02) 1   // self
+  WRITE_BYTE (o + 0x03) 0   // power 0: no spell-level immunity can block it
+  WRITE_BYTE (o + 0x0c) tim
+  WRITE_BYTE (o + 0x0d) 0   // not dispellable, ignores magic resistance
+  WRITE_LONG (o + 0x0e) dur
+  READ_SHORT 0x90 c
+  WRITE_SHORT 0x90 (c + 1)
+END
+
+INCLUDE ~%MOD_FOLDER%/lib/detect.tpa~
+
+// ---------------------------------------------------------------------------
+// Pass 2: give each stone its orbit ability and build its spells.
+//   IPCnnnA  applied by the item ability: the stone's worn effects, permanent
+//   IPCnnnH  the stone's Maximum HP effects (see README for why separate)
+//   IPCnnnB  innate "Recall": strips A and H, hands the stone back
+// ---------------------------------------------------------------------------
+OUTER_SET ipc_n = 0
+OUTER_SET ipc_long = 100000000
+OUTER_SPRINT ipc_note @10
+OUTER_SPRINT ipc_recall @11
+OUTER_SPRINT ipc_recall_desc @12
+OUTER_SET ipc_str = RESOLVE_STR_REF (@13)
+PRINT @20
+
+ACTION_PHP_EACH ipc_stones AS ipc_res => ipc_v BEGIN
+  OUTER_SET ipc_ok = 0
+  OUTER_SET ipc_n += 1
+  ACTION_IF (ipc_n < 10) BEGIN
+    OUTER_SPRINT ipc_num ~00%ipc_n%~
+  END ELSE ACTION_IF (ipc_n < 100) BEGIN
+    OUTER_SPRINT ipc_num ~0%ipc_n%~
+  END ELSE BEGIN
+    OUTER_SPRINT ipc_num ~%ipc_n%~
+  END
+
+  COPY_EXISTING ~%ipc_res%.itm~ ~override~
+    READ_LONG  0x64 ho
+    READ_SHORT 0x68 hn
+    READ_LONG  0x6a fo
+    READ_SHORT 0x6e gi
+    READ_SHORT 0x70 gn
+    PATCH_IF (hn = 0) BEGIN   // no abilities yet: the first one goes right after the header
+      SET ho = 0x72
+      WRITE_LONG 0x64 ho
+    END
+    SET ins = ho + 56 * hn
+    // only handle the standard layout: header, abilities, then effects to EOF
+    PATCH_IF (fo >= ins AND ((BUFFER_LENGTH - fo) MODULO 48) = 0) BEGIN
+      SET ipc_ok = 1
+      READ_ASCII 0x3a ipc_icon (8) NULL
+      READ_LONG 0x0c n2
+      PATCH_IF (n2 >= 0) BEGIN READ_STRREF 0x0c ipc_name END ELSE BEGIN READ_STRREF 0x08 ipc_name END
+      SET ipc_charges = 1
+      READ_LONG 0x18 ipc_flags
+      SET ipc_cursed = ((ipc_flags BAND 0x10) = 0x10) ? 1 : 0
+      PATCH_IF (hn > 0) BEGIN
+        READ_SHORT (ho + 0x22) ch
+        PATCH_IF (ch > 0) BEGIN SET ipc_charges = ch END
+      END
+
+      // collect the worn ("while equipped") effects
+      SET ipc_fxn = 0
+      SET ipc_hpn = 0
+      FOR (i = 0; i < gn; ++i) BEGIN
+        SET o = fo + 48 * (gi + i)
+        READ_SHORT o op
+        READ_BYTE (o + 0x0c) tim
+        PATCH_IF (tim = 2) BEGIN
+          READ_ASCII o fx (48)
+          PATCH_IF (op = 18) BEGIN
+            SPRINT $ipc_hp(~%ipc_hpn%~) ~%fx%~
+            SET ipc_hpn += 1
+          END ELSE BEGIN
+            SPRINT $ipc_fx(~%ipc_fxn%~) ~%fx%~
+            SET ipc_fxn += 1
+          END
+        END
+      END
+
+      // new item ability "Put in Orbit"
+      INSERT_BYTES ins 56
+      SET fo += 56
+      WRITE_LONG  0x6a fo
+      WRITE_SHORT 0x68 (hn + 1)
+      SET idx = (BUFFER_LENGTH - fo) / 48
+      WRITE_BYTE  ins 3                         // magical
+      WRITE_BYTE  (ins + 0x02) 3                // item button
+      WRITE_ASCIIE (ins + 0x04) ~%ipc_icon%~ #8
+      WRITE_BYTE  (ins + 0x0c) 5                // self
+      WRITE_SHORT (ins + 0x0e) 1
+      WRITE_SHORT (ins + 0x1e) 1
+      WRITE_SHORT (ins + 0x20) idx
+      WRITE_SHORT (ins + 0x2a) 1                // no projectile
+      SET o = BUFFER_LENGTH
+      INSERT_BYTES o 48
+      WRITE_SHORT o 146                         // cast spell
+      WRITE_BYTE  (o + 0x02) 1
+      WRITE_LONG  (o + 0x08) 1                  // instantly
+      WRITE_BYTE  (o + 0x0c) 1
+      WRITE_BYTE  (o + 0x12) 100
+      WRITE_ASCIIE (o + 0x14) ~IPC%ipc_num%A~ #8
+
+      PATCH_IF (ipc_auto_identify) BEGIN WRITE_SHORT 0x42 0 END
+      PATCH_IF (ipc_describe) BEGIN
+        READ_LONG 0x54 d
+        PATCH_IF (d >= 0) BEGIN
+          READ_STRREF 0x54 old
+          SAY_EVALUATED 0x54 ~%old%
+
+%ipc_note%~
+        END
+      END
+    END
+  BUT_ONLY
+
+  ACTION_IF (ipc_ok) BEGIN
+    // A: the orbit itself
+    COPY ~%MOD_FOLDER%/spl/ipcbase.spl~ ~override/IPC%ipc_num%A.spl~
+      WRITE_ASCIIE 0x3a ~%ipc_icon%~ #8
+      WRITE_ASCIIE 0x76 ~%ipc_icon%~ #8
+      // take the stone out of the head slot (lowest slot first = worn one)
+      LPF ipc_fx INT_VAR op = 112 p1 = 3 STR_VAR res = EVAL ~%ipc_res%~ END
+      FOR (i = 0; i < ipc_fxn; ++i) BEGIN
+        SPRINT fx $ipc_fx(~%i%~)
+        LPF ipc_raw STR_VAR fx = EVAL ~%fx%~ END
+      END
+      PATCH_IF (ipc_hpn > 0) BEGIN
+        // apply H now, and again within a round whenever it is missing
+        // (condition 20 with value 102 = "HP below 102%" = always true)
+        LPF ipc_fx INT_VAR op = 146 p2 = 1 STR_VAR res = EVAL ~IPC%ipc_num%H~ END
+        LPF ipc_fx INT_VAR op = 232 tim = 9 p2 = 20 special = 102 STR_VAR res = EVAL ~IPC%ipc_num%H~ END
+      END
+      LPF ipc_fx INT_VAR op = 171 STR_VAR res = EVAL ~IPC%ipc_num%B~ END
+      // last: a second copy of the same stone cannot be orbited on top
+      LPF ipc_fx INT_VAR op = 206 tim = 9 p1 = "-1" STR_VAR res = EVAL ~IPC%ipc_num%A~ END
+
+    // H: Maximum HP effects, kept as an ordinary long-duration effect
+    ACTION_IF (ipc_hpn > 0) BEGIN
+      COPY ~%MOD_FOLDER%/spl/ipcbase.spl~ ~override/IPC%ipc_num%H.spl~
+        FOR (i = 0; i < ipc_hpn; ++i) BEGIN
+          SPRINT fx $ipc_hp(~%i%~)
+          LPF ipc_raw INT_VAR tim = 0 dur = ipc_long STR_VAR fx = EVAL ~%fx%~ END
+        END
+        LPF ipc_fx INT_VAR op = 206 tim = 0 dur = ipc_long p1 = "-1" STR_VAR res = EVAL ~IPC%ipc_num%H~ END
+    END
+
+    // B: innate "Recall <stone>"
+    COPY ~%MOD_FOLDER%/spl/ipcbase.spl~ ~override/IPC%ipc_num%B.spl~
+      WRITE_ASCIIE 0x3a ~%ipc_icon%~ #8
+      WRITE_ASCIIE 0x76 ~%ipc_icon%~ #8
+      SAY_EVALUATED NAME1 ~%ipc_recall%: %ipc_name%~
+      SAY_EVALUATED UNIDENTIFIED_DESC ~%ipc_recall_desc%~
+      PATCH_IF (ipc_cursed) BEGIN
+        // cursed: only raise a flag; the game script below does the recall
+        LPF ipc_fx INT_VAR op = 309 p1 = ipc_n STR_VAR res = ~IPCRC~ END
+      END ELSE BEGIN
+        LPF ipc_fx INT_VAR op = 321 STR_VAR res = EVAL ~IPC%ipc_num%A~ END
+        LPF ipc_fx INT_VAR op = 321 STR_VAR res = EVAL ~IPC%ipc_num%H~ END
+        LPF ipc_fx INT_VAR op = 122 p1 = ipc_charges STR_VAR res = EVAL ~%ipc_res%~ END
+        LPF ipc_fx INT_VAR op = 172 STR_VAR res = EVAL ~IPC%ipc_num%B~ END
+      END
+
+    // Cursed stones go straight back onto the head, so the curse cannot be
+    // dodged by orbiting. The effect that fills a slot destroys what is in it,
+    // so the script only allows the recall while the head slot is empty.
+    ACTION_IF (ipc_cursed) BEGIN
+      COPY ~%MOD_FOLDER%/spl/ipcbase.spl~ ~override/IPC%ipc_num%C.spl~
+        LPF ipc_fx INT_VAR op = 321 STR_VAR res = EVAL ~IPC%ipc_num%A~ END
+        LPF ipc_fx INT_VAR op = 321 STR_VAR res = EVAL ~IPC%ipc_num%H~ END
+        LPF ipc_fx INT_VAR op = 143 p1 = 6 STR_VAR res = EVAL ~%ipc_res%~ END   // slot 6 = helmet
+        LPF ipc_fx INT_VAR op = 172 STR_VAR res = EVAL ~IPC%ipc_num%B~ END
+      // D: using Recall spends it like any innate; a refused recall hands it back
+      COPY ~%MOD_FOLDER%/spl/ipcbase.spl~ ~override/IPC%ipc_num%D.spl~
+        LPF ipc_fx INT_VAR op = 172 STR_VAR res = EVAL ~IPC%ipc_num%B~ END
+        LPF ipc_fx INT_VAR op = 171 STR_VAR res = EVAL ~IPC%ipc_num%B~ END
+      OUTER_FOR (ipc_p = 1; ipc_p <= 6; ++ipc_p) BEGIN
+        EXTEND_TOP ~baldur.bcs~ ~%MOD_FOLDER%/baf/recall.baf~ EVALUATE_BUFFER
+        ACTION_IF (FILE_EXISTS_IN_GAME ~baldur25.bcs~) BEGIN
+          EXTEND_TOP ~baldur25.bcs~ ~%MOD_FOLDER%/baf/recall.baf~ EVALUATE_BUFFER
+        END
+      END
+      OUTER_SPRINT ipc_name ~%ipc_name% [cursed: recalls to the head slot]~
+    END
+
+    PRINT ~  %ipc_res%  %ipc_name%  (IPC%ipc_num%, HP effects: %ipc_hpn%)~
+  END ELSE BEGIN
+    WARN ~Ironstone Pebble Collection: skipped %ipc_res% (unusual file layout)~
+  END
+END
+
+// ===========================================================================
+BEGIN @30 DESIGNATED 10 LABEL ~ironstone_pebbles-visuals~
+REQUIRE_PREDICATE GAME_IS ~bgee bg2ee eet iwdee~ @2
+
+INCLUDE ~%MOD_FOLDER%/lib/detect.tpa~
+INCLUDE ~%MOD_FOLDER%/lib/colours.tpa~
+
+COPY ~%MOD_FOLDER%/vis~ ~override~
+PRINT @31
+
+ACTION_PHP_EACH ipc_stones AS ipc_res => ipc_v BEGIN
+  OUTER_SET ipc_has = 0
+  OUTER_SPRINT ipc_orb ~~
+
+  // does the stone already show a working orbit animation?
+  COPY_EXISTING ~%ipc_res%.itm~ ~override~
+    READ_LONG  0x6a fo
+    READ_SHORT 0x6e gi
+    READ_SHORT 0x70 gn
+    READ_ASCII 0x3a ipc_icon (8) NULL
+    SPRINT ipc_nm ~~
+    READ_LONG 0x08 n1
+    READ_LONG 0x0c n2
+    PATCH_IF (n1 >= 0) BEGIN READ_STRREF 0x08 ipc_nm END
+    SPRINT ipc_name ~%ipc_nm%~
+    PATCH_IF (n2 >= 0) BEGIN
+      READ_STRREF 0x0c ipc_name
+      SPRINT ipc_nm ~%ipc_nm% %ipc_name%~
+    END
+    TO_LOWER ipc_nm
+    FOR (i = 0; i < gn; ++i) BEGIN
+      SET o = fo + 48 * (gi + i)
+      READ_SHORT o op
+      READ_BYTE (o + 0x0c) tim
+      PATCH_IF (op = 215 AND tim = 2) BEGIN
+        READ_ASCII (o + 0x14) vres (8) NULL
+        PATCH_IF (FILE_EXISTS_IN_GAME ~%vres%.vvc~) BEGIN
+          INNER_PATCH_FILE ~%vres%.vvc~ BEGIN
+            READ_ASCII 0x08 vbam (8) NULL
+          END
+          PATCH_IF (FILE_EXISTS_IN_GAME ~%vbam%.bam~) BEGIN SET ipc_has = 1 END
+        END ELSE PATCH_IF (FILE_EXISTS_IN_GAME ~%vres%.bam~) BEGIN
+          SET ipc_has = 1
+        END
+      END
+    END
+    // the orbit spell made by the main component, if it is installed
+    FOR (o = fo; o + 48 <= BUFFER_LENGTH; o += 48) BEGIN
+      READ_SHORT o op
+      PATCH_IF (op = 146) BEGIN
+        READ_ASCII (o + 0x14) r (8) NULL
+        PATCH_IF (~%r%~ STRING_MATCHES_REGEXP ~^IPC[0-9]+A$~ = 0) BEGIN SPRINT ipc_orb ~%r%~ END
+      END
+    END
+  BUT_ONLY
+
+  ACTION_IF (!ipc_has) BEGIN
+    OUTER_SPRINT ipc_col ~~
+    OUTER_SPRINT ipc_how ~default~
+    // 1. explicit choice in settings.tpa
+    ACTION_IF (VARIABLE_IS_SET $ipc_colour(~%ipc_res%~)) BEGIN
+      OUTER_SPRINT ipc_col $ipc_colour(~%ipc_res%~)
+      OUTER_SPRINT ipc_how ~settings~
+    END
+    // 2. a colour word in the stone's name
+    ACTION_IF (~%ipc_col%~ STR_EQ ~~) BEGIN
+      ACTION_PHP_EACH ipc_kw AS k => rx BEGIN
+        ACTION_IF ((~%ipc_col%~ STR_EQ ~~) AND (~%ipc_nm%~ STRING_CONTAINS_REGEXP ~\b\(%rx%\)\b~ = 0)) BEGIN
+          OUTER_SPRINT ipc_col ~%k_1%~
+          OUTER_SPRINT ipc_how ~name~
+        END
+      END
+    END
+    // 3. the dominant colour of the inventory icon
+    ACTION_IF ((~%ipc_col%~ STR_EQ ~~) AND (FILE_EXISTS_IN_GAME ~%ipc_icon%.bam~)) BEGIN
+      LAF ipc_icon_colour STR_VAR icon = EVAL ~%ipc_icon%~ RET col END
+      ACTION_IF (~%col%~ STR_CMP ~~) BEGIN
+        OUTER_SPRINT ipc_col ~%col%~
+        OUTER_SPRINT ipc_how ~icon~
+      END
+    END
+    ACTION_IF (~%ipc_col%~ STR_EQ ~~) BEGIN OUTER_SPRINT ipc_col ~WH~ END
+
+    COPY_EXISTING ~%ipc_res%.itm~ ~override~
+      LPF ADD_ITEM_EQEFFECT INT_VAR opcode = 215 target = 1 timing = 2 parameter2 = 1 STR_VAR resource = EVAL ~IPCV1%ipc_col%~ END
+      LPF ADD_ITEM_EQEFFECT INT_VAR opcode = 215 target = 1 timing = 2 parameter2 = 1 STR_VAR resource = EVAL ~IPCV2%ipc_col%~ END
+    BUT_ONLY
+    ACTION_IF ((~%ipc_orb%~ STR_CMP ~~) AND (FILE_EXISTS_IN_GAME ~%ipc_orb%.spl~)) BEGIN
+      // placed first: the spell's last effect blocks anything after it
+      COPY_EXISTING ~%ipc_orb%.spl~ ~override~
+        LPF ADD_SPELL_EFFECT INT_VAR opcode = 215 target = 1 timing = 9 parameter2 = 1 insert_point = 0 STR_VAR resource = EVAL ~IPCV2%ipc_col%~ END
+        LPF ADD_SPELL_EFFECT INT_VAR opcode = 215 target = 1 timing = 9 parameter2 = 1 insert_point = 0 STR_VAR resource = EVAL ~IPCV1%ipc_col%~ END
+      BUT_ONLY
+    END
+    PRINT ~  %ipc_res%  %ipc_name%  -> %ipc_col% (from %ipc_how%)~
+  END
+END

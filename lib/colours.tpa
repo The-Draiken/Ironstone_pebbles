@@ -1,0 +1,114 @@
+// Colour codes: RD red, OR orange, GD gold, GR green, CY turquoise, BL blue,
+// PU purple, PK pink, WH white, SV silver, DK dark, BZ bronze.
+// Each has a pair of animations in vis/: IPCV1xx and IPCV2xx.
+
+// Colour words looked for (as whole words) in a stone's name, first match wins.
+// Keys are "<order>_<code>"; only the code is used.
+ACTION_DEFINE_ASSOCIATIVE_ARRAY ipc_kw BEGIN
+  ~01~, ~RD~ => ~red\|scarlet\|crimson\|ruby\|maroon~
+  ~02~, ~OR~ => ~orange\|amber~
+  ~03~, ~GD~ => ~gold\|golden\|yellow\|topaz~
+  ~04~, ~GR~ => ~green\|emerald\|jade~
+  ~05~, ~BL~ => ~blue\|cerulean\|azure\|sapphire\|cobalt~
+  ~06~, ~CY~ => ~turquoise\|cyan\|aqua\|teal~
+  ~07~, ~PU~ => ~purple\|lavender\|violet\|amethyst\|lilac~
+  ~08~, ~PK~ => ~pink\|rose\|magenta~
+  ~09~, ~WH~ => ~white\|pearl\|pearly\|clear\|crystal\|diamond\|ivory~
+  ~10~, ~SV~ => ~silver\|platinum\|grey\|gray\|steel~
+  ~11~, ~DK~ => ~black\|obsidian\|shadow\|onyx\|ebony~
+  ~12~, ~BZ~ => ~bronze\|brown\|copper~
+END
+
+// Works out the dominant colour of an inventory icon (BAM V1 only).
+// Returns an empty string if the icon cannot be read.
+DEFINE_ACTION_FUNCTION ipc_icon_colour
+  STR_VAR icon = ~~
+  RET col
+BEGIN
+  OUTER_SPRINT col ~~
+  COPY_EXISTING - ~%icon%.bam~ ~override~   // "-": read only, nothing is written
+    READ_ASCII 0 sig (4)
+    PATCH_IF (~%sig%~ STR_EQ ~BAMC~) BEGIN
+      READ_LONG 8 ulen
+      DECOMPRESS_REPLACE_FILE 12 (BUFFER_LENGTH - 12) ulen
+      READ_ASCII 0 sig (4)
+    END
+    READ_ASCII 4 ver (4)
+    PATCH_IF ((~%sig%~ STR_EQ ~BAM ~) AND (~%ver%~ STR_EQ ~V1  ~)) BEGIN
+      READ_BYTE 0x0b rle
+      READ_LONG 0x0c fo
+      READ_LONG 0x10 po
+      READ_SHORT fo w
+      READ_SHORT (fo + 2) h
+      READ_LONG (fo + 8) d
+      SET raw = (d < 0) ? 1 : 0
+      SET p = d BAND 0x7fffffff
+      SET total = w * h
+      FOR (i = 0; i < 12; ++i) BEGIN SET $bin(~%i%~) = 0 END
+      SET n = 0 SET grey = 0 SET gsum = 0 SET csum = 0 SET cval = 0
+      SET done = 0
+      WHILE (done < total AND p < BUFFER_LENGTH) BEGIN
+        READ_BYTE p c
+        SET p += 1
+        SET run = 1
+        PATCH_IF (!raw AND c = rle) BEGIN
+          READ_BYTE p run
+          SET run += 1
+          SET p += 1
+        END
+        SET done += run
+        PATCH_IF (c != rle AND c != 0) BEGIN
+          READ_BYTE (po + 4 * c) b
+          READ_BYTE (po + 4 * c + 1) g
+          READ_BYTE (po + 4 * c + 2) r
+          SET mx = (r > g) ? r : g
+          SET mx = (mx > b) ? mx : b
+          SET mn = (r < g) ? r : g
+          SET mn = (mn < b) ? mn : b
+          PATCH_IF (mx >= 24) BEGIN        // skip shadow and outline
+            SET n += run
+            SET s = mx - mn
+            PATCH_IF (s * 4 < mx OR s < 30) BEGIN
+              SET grey += run
+              SET gsum += mx * run
+            END ELSE BEGIN
+              PATCH_IF (mx = r) BEGIN
+                SET hue = (60 * (g - b)) / s
+              END ELSE PATCH_IF (mx = g) BEGIN
+                SET hue = 120 + (60 * (b - r)) / s
+              END ELSE BEGIN
+                SET hue = 240 + (60 * (r - g)) / s
+              END
+              SET k = ((hue + 375) MODULO 360) / 30
+              SET $bin(~%k%~) = $bin(~%k%~) + s * run
+              SET csum += run
+              SET cval += mx * run
+            END
+          END
+        END
+      END
+      PATCH_IF (n > 0) BEGIN
+        PATCH_IF (csum * 4 < n) BEGIN       // mostly colourless
+          SET v = (grey > 0) ? gsum / grey : 0
+          PATCH_IF (v >= 170) BEGIN SPRINT col ~WH~ END ELSE PATCH_IF (v >= 90) BEGIN SPRINT col ~SV~ END ELSE BEGIN SPRINT col ~DK~ END
+        END ELSE BEGIN
+          SET best = 0
+          FOR (i = 1; i < 12; ++i) BEGIN
+            PATCH_IF ($bin(~%i%~) > $bin(~%best%~)) BEGIN SET best = i END
+          END
+          SET v = cval / csum
+          // 30-degree hue bands starting at red
+          PATCH_MATCH best WITH
+            0 11 BEGIN SPRINT col ~RD~ END
+            1 BEGIN PATCH_IF (v < 150) BEGIN SPRINT col ~BZ~ END ELSE BEGIN SPRINT col ~OR~ END END
+            2 BEGIN SPRINT col ~GD~ END
+            3 4 5 BEGIN SPRINT col ~GR~ END
+            6 BEGIN SPRINT col ~CY~ END
+            7 8 BEGIN SPRINT col ~BL~ END
+            9 BEGIN SPRINT col ~PU~ END
+            DEFAULT SPRINT col ~PK~
+          END
+        END
+      END
+    END
+END
